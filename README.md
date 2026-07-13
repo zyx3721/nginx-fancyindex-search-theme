@@ -1,6 +1,6 @@
-# Nginx Fancyindex Theme
+# Nginx Fancyindex Search Theme
 
-Nginx Fancyindex Theme 是一套用于 `ngx-fancyindex` 目录列表的响应式前端主题。它保留 Nginx 对静态文件和目录的直接服务能力，使用 MDUI 呈现面包屑、目录/文件列表、主题切换、文件链接复制和 Markdown README 预览。
+Nginx Fancyindex Search Theme 是一套用于 `ngx-fancyindex` 目录列表的响应式前端主题。它保留 Nginx 对静态文件和目录的直接服务能力，使用 MDUI 呈现面包屑、目录/文件列表、主题切换、文件链接复制和 Markdown README 预览。
 
 项目额外提供可选的递归搜索服务：它在 SQLite FTS5 中预建文件名与相对路径索引，用户搜索时不递归请求目录，也不在 Nginx 工作进程中扫描磁盘。搜索范围会自动限制为当前网页目录及其所有子目录、子文件。
 
