@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, shrink-to-fit=no"/>
+    <meta name="renderer" content="webkit"/>
+    <meta name="force-rendering" content="webkit"/>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1"/>
+
+    <!-- MDUI CSS -->
+    <link rel="stylesheet" href="/fancyindex/css/mdui.min.css"/>
+    <link rel="stylesheet" href="/fancyindex/css/index.css"/>
+    <title>File Browser</title>
+</head>
+<body>
+<script>
+(function () {
+    var defaultTheme = { theme: 'auto', primary: 'teal', accent: 'teal' }
+    var validThemes = ['auto', 'light', 'dark']
+    var validColors = ['amber', 'blue', 'blue-grey', 'brown', 'cyan', 'deep-orange', 'deep-purple', 'green', 'grey', 'indigo', 'light-blue', 'light-green', 'lime', 'orange', 'pink', 'purple', 'red', 'teal', 'yellow']
+    var theme = defaultTheme
+
+    try {
+        var savedTheme = JSON.parse(localStorage.getItem('fileBrowserConfig'))
+        if (savedTheme
+            && validThemes.indexOf(savedTheme.theme) !== -1
+            && validColors.indexOf(savedTheme.primary) !== -1
+            && validColors.indexOf(savedTheme.accent) !== -1) {
+            theme = savedTheme
+        }
+    } catch (error) {
+        // 无效或不可用的本地存储不应阻断首屏渲染。
+    }
+
+    document.body.className = `mdui-theme-primary-${theme.primary} mdui-theme-accent-${theme.accent} mdui-theme-layout-${theme.theme}`
+})()
+</script>
+<div class="mdui-drawer-body-left mdui-appbar-with-toolbar">
+    <!-- 应用栏 -->
+    <header class="mdui-appbar mdui-appbar-fixed">
+        <div class="mdui-toolbar mdui-color-theme">
+            <a href="javascript:;" class="mdui-btn mdui-btn-icon mdui-ripple" mdui-drawer="{target:'#left-drawer'}"><i class="mdui-icon material-icons">menu</i></a>
+            <a href="javascript:;" class="mdui-typo-title m-appbar-title">File Browser</a>
+            <div class="mdui-toolbar-spacer"></div>
+            <button type="button" class="mdui-btn mdui-btn-icon mdui-ripple m-file-search-trigger" data-i18n-tooltip="search" mdui-tooltip="{content: '搜索'}"><i class="mdui-icon material-icons">search</i></button>
+            <a href="javascript:;" class="mdui-btn mdui-btn-icon mdui-ripple" data-i18n-tooltip="sort" mdui-tooltip="{content: '排序'}" mdui-menu="{target: '#m-menu-sort'}"><i class="mdui-icon material-icons">sort</i></a>
+            <ul class="mdui-menu" id="m-menu-sort">
+                <li class="mdui-menu-item">
+                    <a href='?C=M&O=A' class="mdui-ripple m-sort-option" data-sort-column="M">
+                        <i class="mdui-menu-item-icon mdui-icon material-icons">date_range</i>
+                        <span class="m-sort-label" data-i18n="sort.date">按日期</span>
+                        <i class="mdui-icon material-icons m-sort-direction" aria-hidden="true">unfold_more</i>
+                    </a>
+                </li>
+                <li class="mdui-menu-item">
+                    <a href='?C=N&O=A' class="mdui-ripple m-sort-option" data-sort-column="N">
+                        <i class="mdui-menu-item-icon mdui-icon material-icons">sort_by_alpha</i>
+                        <span class="m-sort-label" data-i18n="sort.name">按名称</span>
+                        <i class="mdui-icon material-icons m-sort-direction" aria-hidden="true">unfold_more</i>
+                    </a>
+                </li>
+                <li class="mdui-menu-item">
+                    <a href='?C=S&O=A' class="mdui-ripple m-sort-option" data-sort-column="S">
+                        <i class="mdui-menu-item-icon mdui-icon material-icons">equalizer</i>
+                        <span class="m-sort-label" data-i18n="sort.size">按大小</span>
+                        <i class="mdui-icon material-icons m-sort-direction" aria-hidden="true">unfold_more</i>
+                    </a>
+                </li>
+                <li class="mdui-divider"></li>
+                <li class="mdui-menu-item">
+                    <a href="" class="mdui-ripple m-sort-reset">
+                        <i class="mdui-menu-item-icon mdui-icon material-icons">restore</i>
+                        <span class="m-sort-label" data-i18n="sort.reset">恢复默认排序</span>
+                    </a>
+                </li>
+            </ul>
+            <span class="mdui-btn mdui-btn-icon mdui-ripple mdui-ripple-white" mdui-dialog="{target: '#dialog-docs-theme'}" data-i18n-tooltip="theme.settings" mdui-tooltip="{content: '主题设置'}"><i
+                    class="mdui-icon material-icons">color_lens</i></span>
+            <button type="button" class="mdui-btn mdui-btn-icon mdui-ripple mdui-ripple-white m-language-toggle" data-i18n-tooltip="language.switch" data-tooltip-position="bottom" mdui-tooltip="{content: 'Switch to English', position: 'bottom'}">
+                <i class="mdui-icon material-icons">translate</i>
+            </button>
+        </div>
+        <div class="mdui-textfield m-file-search-shell">
+            <i class="mdui-icon material-icons m-file-search-leading-icon" aria-hidden="true">search</i>
+            <input class="mdui-textfield-input m-file-search m-file-search-input" type="text" data-i18n-placeholder="search" placeholder="搜索"/>
+            <button type="button" class="mdui-btn mdui-btn-icon m-file-search-clear" data-i18n-tooltip="close" mdui-tooltip="{content: '关闭'}"><i class="mdui-icon material-icons">close</i></button>
+        </div>
+    </header>
+    <div class="mdui-drawer" id="left-drawer">
+        <div class="mdui-list">
+            <div class="mdui-list-item mdui-ripple">
+                <i class="mdui-list-item-icon mdui-icon material-icons mdui-text-color-theme">cloud_queue</i>
+                <div class="mdui-list-item-content">
+                    <h2 class="mdui-list-item-title mdui-text-color-theme m-site-title">Fancyindex</h2>
+                </div>
+            </div>
+        </div>
+        <div class="mdui-list m-list-index">
+            <!--
+                    <div class="mdui-list-item mdui-ripple ">
+                        <a href="/1/2/3/4">
+                            <i class="mdui-list-item-icon mdui-icon material-icons mdui-text-color-theme">home</i>
+                            <span class="mdui-list-item-content mdui-text-color-theme">home</span>
+                        </a>
+                    </div>
+            -->
+        </div>
+    </div>
+    <div class="mdui-container" style="padding: 24px 0 72px">
+        <div class="m-original-fancyindex" style="display: none">
+            <h1 id="m-index-path">
