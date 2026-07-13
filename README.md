@@ -95,7 +95,7 @@ nginx-fancyindex-theme/
 
 ## 2.1 前置条件
 
-1. Nginx 已安装并加载 `ngx-fancyindex` 模块。
+1. Nginx 已安装并加载 [`ngx-fancyindex`](https://github.com/aperezdc/ngx-fancyindex) 模块（by @aperezdc）。
 2. Python 3.7+ 可执行，推荐 3.9+。
 3. Python 的 SQLite 支持 FTS5。可用以下命令检查：
 
@@ -120,7 +120,21 @@ git clone https://github.com/zyx3721/nginx-fancyindex-theme.git /data/mirrors/fa
 
 SQLite 数据库会在首次索引时创建在 `/data/mirrors/fancyindex/search/` 目录。后续 systemd 中配置的服务用户必须对 `/data/mirrors/fancyindex/search/` 拥有读写权限，对 `/data/mirrors/` 拥有只读遍历权限。示例使用 `www-data` ；实际 Nginx 运行用户不同则同步替换 `User`、`Group` 。
 
-## 2.3 配置 Nginx
+## 2.3 修改 `FileBrowserContext.js` 文件
+
+在 `/data/mirrors/fancyindex/js` 目录下，编辑 `FileBrowserContext.js` 文件，将以下内容修改为映射的下载目录，**注意路径最后需要以 `/` 结尾**：
+
+```bash
+vim /data/mirrors/fancyindex/js/FileBrowserContext.js
+
+# 找到以下内容
+root = new FileContext('home', '/', 'home', true)
+
+# 修改示例如下
+root = new FileContext('home', '/downloads/', 'home', true)
+```
+
+## 2.4 配置 Nginx
 
 将以下内容放入目标站点的 `server` 块。站点已有 HTTPS、认证、限流或访问白名单时应保留原配置；`/api/search` 必须接受与文件目录相同的访问控制：
 
@@ -174,7 +188,7 @@ nginx -t
 nginx -s reload
 ```
 
-## 2.4 配置搜索 API 服务
+## 2.5 配置搜索 API 服务
 
 在 `/etc/systemd/system` 目录下，创建 `fancyindex-search.service` 搜索 API 服务文件，并添加以下示例内容：
 
@@ -215,7 +229,7 @@ EOF
 | `Restart=on-failure` | 服务异常退出后自动重启，正常停止不会重启。 |
 | `NoNewPrivileges` 至 `ReadWritePaths` | 限制进程权限、临时目录和可写路径，减少搜索服务暴露面。 |
 
-## 2.5 配置索引服务
+## 2.6 配置索引服务
 
 在 `/etc/systemd/system` 目录下，创建 `fancyindex-file-index.service` 索引服务文件，并添加以下示例内容：
 
@@ -248,7 +262,7 @@ EOF
 | `IOSchedulingClass` / `IOSchedulingPriority` | 将扫描设为 best-effort 的较低 I/O 优先级；内核或文件系统不支持时可删除这两行。 |
 | 排除规则 | `--exclude /fancyindex/` 精确排除主题目录及其所有后代；可在 `ExecStart` 末尾增加多个 `--exclude PATH_OR_PATTERN`。 |
 
-## 2.6 配置定时索引
+## 2.7 配置定时索引
 
 在 `/etc/systemd/system` 目录下，创建 `fancyindex-file-index.timer` 定时索引文件，并添加以下示例内容：
 
@@ -279,7 +293,7 @@ EOF
 
 该 timer 使用启动后/服务结束后的单调计时，不会补跑机器关机期间错过的周期。手动启动同一 `oneshot` 服务后，下一次 `OnUnitInactiveSec` 会从该次服务结束重新计时；timer 与手动启动不会运行两个并发实例。需要严格按日历时间补跑时，应改用 `OnCalendar` 方案，并根据业务窗口单独设计。
 
-## 2.7 启动服务与首次索引
+## 2.8 启动服务与首次索引
 
 首次索引应在低峰期手动执行，确认完成后再启用定时器：
 
@@ -298,7 +312,7 @@ systemctl enable --now fancyindex-search.service fancyindex-file-index.timer
 
 若有人绕过 systemd 直接运行 `file_index.py`，脚本也会争抢同一个 `files.db.lock`。抢锁失败的进程会以退出码 `2` 结束，并记录持有进程的 PID、主机、开始时间、扫描根目录和锁文件路径，可通过 `journalctl -u fancyindex-file-index.service` 排查。
 
-## 2.8 验证测试
+## 2.9 验证测试
 
 ```bash
 # 确认搜索 API 服务处于运行状态
