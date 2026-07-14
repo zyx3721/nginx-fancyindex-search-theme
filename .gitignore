@@ -1,3 +1,4 @@
 /.idea
 *.iml
 优化.md
+__pycache__
