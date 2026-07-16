@@ -3,8 +3,10 @@ let CTX
 const configKey = "fileBrowserConfig";
 const SEARCH_ENDPOINT = '/api/search';
 const SEARCH_DEBOUNCE_MS = 150;
+const SEARCH_RENDER_FRAME_BUDGET_MS = 8;
 const DESKTOP_SEARCH_LEFT_INSET = 72;
 const DESKTOP_SEARCH_TITLE_GAP = 24;
+let searchRenderId = 0
 const defaultConfig = {
     theme: 'auto',
     primary: 'teal',
@@ -25,6 +27,7 @@ $(function main() {
     initSortMenu()
     FileBrowserI18n.onChange(initSortMenu)
 
+    registerCopyEvent()
     registerSearchFileEvent()
 })
 
@@ -101,14 +104,24 @@ function genFileDetailItem(fileContext, subtitle) {
     if (fileContext.goBack) $title.attr('data-i18n', 'parent')
     const $subtitle = $('<div class="mdui-list-item-text">').text(subtitle === undefined ? (fileContext.date || '') : subtitle)
     const $size = $('<span class="m-file-size mdui-text-color-theme">').text(fileContext.size || '')
-    const $copyButton = $('<button class="mdui-btn mdui-btn-icon mdui-btn-dense mdui-text-color-theme-text mdui-ripple" type="button" data-i18n-tooltip="copy" mdui-tooltip="{content: \'复制链接\'}">')
+    const $copyButton = $('<button class="mdui-btn mdui-btn-icon mdui-btn-dense mdui-text-color-theme-text mdui-ripple m-file-copy" type="button" data-i18n-tooltip="copy" mdui-tooltip="{content: \'复制链接\'}">')
+        .attr('data-copy-link', fileContext.href)
         .append('<i class="mdui-icon material-icons">content_copy</i>')
-        .on('click', () => copyText(fileContext.href))
 
     $content.append($title).append($subtitle)
     const $result = $item.append($icon).append($content).append($size).append($copyButton)
     FileBrowserI18n.applyTranslations($result[0])
     return $result
+}
+
+function registerCopyEvent() {
+    document.addEventListener('click', event => {
+        const copyButton = event.target.closest('.m-file-copy')
+        if (!copyButton) return
+
+        event.preventDefault()
+        copyText(copyButton.dataset.copyLink || '')
+    })
 }
 
 /**
@@ -168,6 +181,7 @@ function registerSearchFileEvent() {
     const $appbarTitle = $('.m-appbar-title')
     let timer
     let requestId = 0
+    let activeSearchRequest
 
     function isMobileSearch() {
         return window.matchMedia('(max-width: 599px)').matches
@@ -262,6 +276,8 @@ function registerSearchFileEvent() {
         const keyword = ($search.val() || '').trim()
         window.clearTimeout(timer)
         requestId += 1
+        cancelSearchRendering()
+        if (activeSearchRequest) activeSearchRequest.abort()
 
         if (!keyword) {
             showCurrentDirectory()
@@ -270,26 +286,32 @@ function registerSearchFileEvent() {
 
         const currentRequestId = requestId
         timer = window.setTimeout(async () => {
+            const controller = new AbortController()
+            activeSearchRequest = controller
+            showSearchLoading()
             try {
-                const results = await searchRecursively(keyword)
+                const results = await searchRecursively(keyword, controller.signal)
                 if (currentRequestId === requestId) {
                     showSearchResults(results)
                 }
             } catch (error) {
+                if (error.name === 'AbortError') return
                 if (currentRequestId === requestId) {
                     filterCurrentDirectory(keyword)
                 }
+            } finally {
+                if (activeSearchRequest === controller) activeSearchRequest = undefined
             }
         }, SEARCH_DEBOUNCE_MS)
     })
 }
 
-async function searchRecursively(keyword) {
+async function searchRecursively(keyword, signal) {
     const parameters = new URLSearchParams({
         path: decodeCurrentPath(),
         q: keyword,
     })
-    const response = await fetch(`${SEARCH_ENDPOINT}?${parameters.toString()}`)
+    const response = await fetch(`${SEARCH_ENDPOINT}?${parameters.toString()}`, {signal})
     if (!response.ok) {
         throw new Error(`search request failed: ${response.status}`)
     }
@@ -308,28 +330,69 @@ function decodeCurrentPath() {
     }
 }
 
-function showSearchResults(results) {
+function cancelSearchRendering() {
+    searchRenderId += 1
+}
+
+function showSearchLoading() {
     const $results = $('.m-search-results').empty().removeClass('mdui-hidden')
     $('.m-file-detail').addClass('mdui-hidden')
-    $results.append(genFileDetailItemDivideLine('search.results', {count: results.length}))
-    results.forEach(result => {
+    $results.append(genFileDetailItemDivideLine('search.results', {count: 0}))
+}
+
+function showSearchResults(results) {
+    const renderId = ++searchRenderId
+    const $results = $('.m-search-results').empty().removeClass('mdui-hidden')
+    $('.m-file-detail').addClass('mdui-hidden')
+    const $divider = genFileDetailItemDivideLine('search.results', {count: 0})
+    $results.append($divider)
+
+    renderSearchResultBatch($results[0], $divider[0], results, 0, renderId)
+}
+
+function updateSearchResultCount(divider, count) {
+    divider.dataset.i18nCount = String(count)
+    divider.textContent = FileBrowserI18n.translate('search.results', {count})
+}
+
+function renderSearchResultBatch(container, divider, results, start, renderId) {
+    if (renderId !== searchRenderId) return
+
+    const fragment = document.createDocumentFragment()
+    const deadline = performance.now() + SEARCH_RENDER_FRAME_BUDGET_MS
+    let end = start
+    while (end < results.length) {
+        const result = results[end]
         const fileContext = {
             name: result.name,
             href: encodePath(result.relative_path),
             icon: result.is_dir ? 'folder' : 'description',
             size: result.is_dir ? '' : formatFileSize(result.size),
         }
-        $results.append(genFileDetailItem(fileContext, result.relative_path))
-    })
+        fragment.appendChild(genFileDetailItem(fileContext, result.relative_path)[0])
+        end += 1
+        if (performance.now() >= deadline) break
+    }
+    container.appendChild(fragment)
+    updateSearchResultCount(divider, end)
+
+    if (end < results.length) {
+        window.requestAnimationFrame(() => {
+            renderSearchResultBatch(container, divider, results, end, renderId)
+        })
+        return
+    }
 }
 
 function showCurrentDirectory() {
+    cancelSearchRendering()
     $('.m-search-results').empty().addClass('mdui-hidden')
     $('.m-file-detail').removeClass('mdui-hidden')
     $('.m-file-detail > .mdui-list-item').removeClass('mdui-hidden')
 }
 
 function filterCurrentDirectory(keyword) {
+    cancelSearchRendering()
     $('.m-search-results').empty().addClass('mdui-hidden')
     $('.m-file-detail').removeClass('mdui-hidden')
     $('.m-file-detail > .mdui-list-item').each((_, element) => {

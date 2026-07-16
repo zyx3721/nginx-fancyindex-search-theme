@@ -22,10 +22,8 @@ try:
 except ImportError:  # pragma: no cover - Windows is supported for local tests only.
     fcntl = None
 
-DEFAULT_LIMIT = 50
-MAX_LIMIT = 100
 MAX_QUERY_LENGTH = 120
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "3"
 
 
 @dataclass(frozen=True)
@@ -128,26 +126,78 @@ def initialize(connection: sqlite3.Connection) -> None:
         );
 
         CREATE INDEX IF NOT EXISTS files_parent_path_idx ON files(parent_path);
+        """
+    )
+    if not _uses_trigram_tokenizer(connection):
+        _rebuild_fts_index(connection)
+    elif not _uses_change_only_fts_update_trigger(connection):
+        _rebuild_fts_triggers(connection)
+    connection.execute(
+        "INSERT OR REPLACE INTO metadata(key, value) VALUES ('schema_version', ?)",
+        (SCHEMA_VERSION,),
+    )
+    connection.commit()
 
-        CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
+
+def _uses_trigram_tokenizer(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'files_fts'"
+    ).fetchone()
+    return row is not None and "tokenize='trigram'" in row["sql"].lower()
+
+
+def _uses_change_only_fts_update_trigger(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'files_after_update'"
+    ).fetchone()
+    return row is not None and (
+        "when old.name is not new.name or old.relative_path is not new.relative_path"
+        in row["sql"].lower()
+    )
+
+
+def _rebuild_fts_index(connection: sqlite3.Connection) -> None:
+    # Tokenizer changes require recreating the FTS table; files metadata remains intact.
+    connection.executescript(
+        """
+        DROP TRIGGER IF EXISTS files_after_insert;
+        DROP TRIGGER IF EXISTS files_after_delete;
+        DROP TRIGGER IF EXISTS files_after_update;
+        DROP TABLE IF EXISTS files_fts;
+
+        CREATE VIRTUAL TABLE files_fts USING fts5(
             name,
             relative_path,
             content='files',
             content_rowid='id',
-            tokenize='unicode61 remove_diacritics 2'
+            tokenize='trigram'
         );
+        """
+    )
+    _rebuild_fts_triggers(connection)
+    connection.execute("INSERT INTO files_fts(files_fts) VALUES ('rebuild')")
 
-        CREATE TRIGGER IF NOT EXISTS files_after_insert AFTER INSERT ON files BEGIN
+
+def _rebuild_fts_triggers(connection: sqlite3.Connection) -> None:
+    connection.executescript(
+        """
+        DROP TRIGGER IF EXISTS files_after_insert;
+        DROP TRIGGER IF EXISTS files_after_delete;
+        DROP TRIGGER IF EXISTS files_after_update;
+
+        CREATE TRIGGER files_after_insert AFTER INSERT ON files BEGIN
             INSERT INTO files_fts(rowid, name, relative_path)
             VALUES (new.id, new.name, new.relative_path);
         END;
 
-        CREATE TRIGGER IF NOT EXISTS files_after_delete AFTER DELETE ON files BEGIN
+        CREATE TRIGGER files_after_delete AFTER DELETE ON files BEGIN
             INSERT INTO files_fts(files_fts, rowid, name, relative_path)
             VALUES ('delete', old.id, old.name, old.relative_path);
         END;
 
-        CREATE TRIGGER IF NOT EXISTS files_after_update AFTER UPDATE OF name, relative_path ON files BEGIN
+        CREATE TRIGGER files_after_update AFTER UPDATE OF name, relative_path ON files
+        WHEN old.name IS NOT new.name OR old.relative_path IS NOT new.relative_path
+        BEGIN
             INSERT INTO files_fts(files_fts, rowid, name, relative_path)
             VALUES ('delete', old.id, old.name, old.relative_path);
             INSERT INTO files_fts(rowid, name, relative_path)
@@ -155,11 +205,6 @@ def initialize(connection: sqlite3.Connection) -> None:
         END;
         """
     )
-    connection.execute(
-        "INSERT OR REPLACE INTO metadata(key, value) VALUES ('schema_version', ?)",
-        (SCHEMA_VERSION,),
-    )
-    connection.commit()
 
 
 def normalize_request_path(value: str) -> str:
@@ -210,7 +255,7 @@ def make_fts_query(query: str) -> str:
     terms = re.findall(r"[\w.-]+", query, flags=re.UNICODE)
     if not terms:
         raise ValueError("query does not contain searchable characters")
-    return " AND ".join(f'"{term.replace(chr(34), chr(34) * 2)}"*' for term in terms)
+    return " AND ".join(f'"{term.replace(chr(34), chr(34) * 2)}"' for term in terms)
 
 
 def parse_exclusion_rules(root: Path, excludes: list[str]) -> ExclusionRules:
@@ -443,12 +488,10 @@ def search(
     connection: sqlite3.Connection,
     current_path: str,
     query: str,
-    limit: int = DEFAULT_LIMIT,
     hidden_search_rules: HiddenSearchRules | None = None,
 ) -> list[dict[str, object]]:
     current_path = normalize_request_path(current_path)
     fts_query = make_fts_query(query)
-    limit = min(max(int(limit), 1), MAX_LIMIT)
     path_prefix = current_path + "%"
     hidden_search_rules = hidden_search_rules or HiddenSearchRules(set(), set())
     hidden_conditions, hidden_parameters = _hidden_search_conditions(
@@ -458,7 +501,6 @@ def search(
     where_conditions.extend(hidden_conditions)
     parameters: list[object] = [fts_query, path_prefix]
     parameters.extend(hidden_parameters)
-    parameters.append(limit)
 
     rows = connection.execute(
         f"""
@@ -468,7 +510,6 @@ def search(
         JOIN files ON files.id = files_fts.rowid
         WHERE {' AND '.join(where_conditions)}
         ORDER BY bm25(files_fts), files.is_dir DESC, files.name COLLATE NOCASE
-        LIMIT ?
         """,
         parameters,
     ).fetchall()

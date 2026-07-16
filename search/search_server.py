@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+from contextlib import closing
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -13,7 +14,6 @@ from urllib.parse import parse_qs, urlparse
 
 from file_index import (
     HiddenSearchRules,
-    MAX_LIMIT,
     connect,
     index_path_to_url_path,
     initialize,
@@ -40,7 +40,7 @@ class SearchHandler(BaseHTTPRequestHandler):
 
     def _handle_health(self) -> None:
         try:
-            with connect(self.database_path) as connection:
+            with closing(connect(self.database_path)) as connection:
                 initialize(connection)
                 self._write_json(HTTPStatus.OK, {"ok": True, **status(connection)})
         except sqlite3.Error:
@@ -50,17 +50,14 @@ class SearchHandler(BaseHTTPRequestHandler):
         parameters = parse_qs(query_string, keep_blank_values=True)
         current_path = parameters.get("path", [""])[0]
         keyword = parameters.get("q", [""])[0]
-        raw_limit = parameters.get("limit", [str(MAX_LIMIT)])[0]
         try:
-            limit = int(raw_limit)
             index_path = request_path_to_index_path(current_path, self.url_prefix)
-            with connect(self.database_path) as connection:
+            with closing(connect(self.database_path)) as connection:
                 initialize(connection)
                 results = search(
                     connection,
                     index_path,
                     keyword,
-                    limit,
                     self.hidden_search_rules,
                 )
             for result in results:
