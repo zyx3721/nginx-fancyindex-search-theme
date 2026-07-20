@@ -95,7 +95,7 @@ nginx-fancyindex-theme/
 
 ## 2.1 前置条件
 
-1. Nginx 已安装并加载 [`ngx-fancyindex`](https://github.com/aperezdc/ngx-fancyindex) 模块（by @aperezdc）。
+1. Nginx 已安装并加载 [`ngx-fancyindex 0.6.0`](https://github.com/aperezdc/ngx-fancyindex) 模块（by @aperezdc）。该版本已移除 `fancyindex_name_length`，文件名溢出由 CSS 处理。
 2. Python 3.7+ 可执行，推荐 3.9+。
 3. Python 的 SQLite 支持 FTS5 `trigram` tokenizer。可用以下命令检查：
 
@@ -145,7 +145,6 @@ root = new FileContext('home', '/downloads/', 'home', true)
         fancyindex on;
         fancyindex_localtime on;
         fancyindex_exact_size off;
-        fancyindex_name_length 256;
         fancyindex_show_path on;
         fancyindex_time_format "%Y-%m-%d %T";
         fancyindex_header "/fancyindex/header.html";
@@ -175,11 +174,49 @@ root = new FileContext('home', '/downloads/', 'home', true)
 | :-: | :-: |
 | `root /data/mirrors/` | URL `/` 直接对应 `/data/mirrors/`；`/fancyindex/` 也由这个根目录提供主题资源。 |
 | `charset utf-8,gbk` | 保持当前镜像目录中 UTF-8 与 GBK 文件名的兼容声明。 |
-| `fancyindex_name_length` / `fancyindex_show_path` / `fancyindex_time_format` | 保留当前目录名称长度、路径和时间展示规则。 |
+| `fancyindex_show_path` / `fancyindex_time_format` | 保留当前目录路径和时间展示规则；文件名溢出由 `ngx-fancyindex 0.6.0` 的 CSS 处理。 |
 | `fancyindex_header/footer` | 将主题 HTML 插入 `ngx-fancyindex` 生成的目录页前后。 |
 | `fancyindex_ignore "fancyindex"` | 隐藏主题和搜索脚本目录，避免它们出现在下载目录列表中；索引服务也会排除同一路径。 |
 | `location = /api/search` | 仅反代搜索请求到本机服务，浏览器不会直接访问 `8765` 端口。 |
 | `proxy_connect_timeout` / `proxy_read_timeout` | 限制不可用搜索服务的等待时间，页面会降级为当前目录筛选。 |
+
+### 2.4.1 受保护的子目录
+
+受保护目录同样可以使用 `fancyindex`。以下配置将 URL `/yunwei/` 显式映射到 `/data/mirrors/yunwei/`，并通过 `auth_basic` 与 `auth_basic_user_file` 要求用户认证后访问。主题 header/footer 使用本地文件模式，不依赖受保护 location 中的子请求。
+
+```nginx
+    location = /yunwei {
+        return 301 /yunwei/;
+    }
+
+    location ^~ /yunwei/ {
+        auth_basic "Authentication required";
+        auth_basic_user_file /usr/local/nginx/conf/htpasswd;
+
+        alias /data/mirrors/yunwei/;
+        charset utf-8,gbk;
+        fancyindex on;
+        fancyindex_localtime on;
+        fancyindex_exact_size off;
+        fancyindex_show_path on;
+        fancyindex_time_format "%Y-%m-%d %T";
+        fancyindex_header "/data/mirrors/fancyindex/header.html" local;
+        fancyindex_footer "/data/mirrors/fancyindex/footer.html" local;
+        fancyindex_ignore "README.md";
+    }
+```
+
+配置说明：
+
+- `location = /yunwei`：将不带末尾 `/` 的请求重定向到 `/yunwei/`。目录列表和相对链接需要稳定的目录 URL。
+- `location ^~ /yunwei/`：处理该目录及其全部子路径；`^~` 使此规则优先于后续正则 location。
+- `auth_basic` / `auth_basic_user_file`：启用 HTTP Basic Auth，并指定存放用户名与密码哈希的文件。
+- `alias /data/mirrors/yunwei/`：用 `/data/mirrors/yunwei/` 替换匹配到的 URL 前缀。例如 `/yunwei/tools/a.zip` 对应 `/data/mirrors/yunwei/tools/a.zip`。`location` 和 `alias` 都应保留末尾 `/`，避免子路径拼接歧义。
+- `fancyindex_header/footer ... local`：由 Nginx 直接读取绝对路径的主题文件，不再对 `/fancyindex/header.html` 发起子请求，避免认证目录中的响应头冲突。
+
+在当前一对一目录结构中，`root /data/mirrors/` 与 `alias /data/mirrors/yunwei/` 的结果相同：前者会把完整 URI `/yunwei/tools/a.zip` 追加到根目录，得到 `/data/mirrors/yunwei/tools/a.zip`；后者会替换掉 `/yunwei/` 前缀，也得到同一文件。两者并非通用等价：当 URL 前缀与磁盘目录名不同，或需要映射到站点根目录之外的位置时，应使用 `alias`；只有磁盘树与 URL 路径天然一致时，`root` 才更直接。这里使用 `alias` 能更清楚地表达 `/yunwei/` 是受保护的独立目录映射。
+
+主题的递归搜索会调用 `/api/search`；该接口必须实施至少与 `/yunwei/` 等效的鉴权，否则未认证请求可能通过搜索获知受保护目录中的文件名和路径。
 
 检查并重载 Nginx：
 
